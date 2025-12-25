@@ -19,12 +19,12 @@ class Chat extends Component
     public $currentUserId;
     public $messages = [];
     public $onlineUsers = [];
+    public $isTyping = false;
 
     public function mount()
     {
         $this->currentUserId = Auth::id();
         
-        // Select the first user from our computed list on load
         if ($this->users->count() > 0) {
             $this->selectUser($this->users->first()->id);
         }
@@ -37,7 +37,6 @@ class Chat extends Component
 
         return User::where('users.id', '!=', $authId)
             ->leftJoin('chat_messages', function ($join) use ($authId) {
-                // MySQL optimized Join to get the latest message per user
                 $join->on('chat_messages.id', '=', DB::raw("(
                     SELECT id FROM chat_messages 
                     WHERE (sender_id = users.id AND receiver_id = $authId)
@@ -54,14 +53,14 @@ class Chat extends Component
                     ->where('receiver_id', $authId)
                     ->where('is_read', false)
             ])
-            // Fix: Changed MySQL-compatible ordering
-            ->orderBy('last_message_at', 'desc') 
+            ->orderBy('last_message_at', 'desc')
             ->get();
     }
 
     public function selectUser($id)
     {
         $this->selectedUser = User::find($id);
+        $this->isTyping = false; // Reset typing status when switching users
         if ($this->selectedUser) {
             $this->loadMessages();
         }
@@ -71,7 +70,6 @@ class Chat extends Component
     {
         if (!$this->selectedUser) return;
 
-        // Mark incoming messages as read
         ChatMessage::where('sender_id', $this->selectedUser->id)
             ->where('receiver_id', auth()->id())
             ->where('is_read', false)
@@ -116,35 +114,38 @@ class Chat extends Component
         return [
             "echo-private:chat.{$this->currentUserId},MessageSent" => 'handleIncomingMessage',
             "echo-private:chat.{$this->currentUserId},MessageRead" => 'handleMessageRead',
+            "echo-presence:chat-presence,.client-typing" => 'handleTyping', // Whisper Listener
             "echo-presence:chat-presence,here" => 'updateOnlineUsers',
             "echo-presence:chat-presence,joining" => 'userJoined',
             "echo-presence:chat-presence,leaving" => 'userLeft',
         ];
     }
 
+    public function handleTyping($event)
+    {
+        if ($this->selectedUser && $event['typingId'] == $this->selectedUser->id && $event['receiverId'] == auth()->id()) {
+            $this->isTyping = true;
+            $this->dispatch('reset-typing');
+        }
+    }
+
     public function handleIncomingMessage($event)
     {
         $incomingMessage = $event['message'];
-        
-        // If we are currently chatting with this person
         if ($this->selectedUser && $incomingMessage['sender_id'] == $this->selectedUser->id) {
             ChatMessage::where('id', $incomingMessage['id'])->update(['is_read' => true]);
             broadcast(new MessageRead(auth()->id(), $incomingMessage['sender_id']))->toOthers();
-            
             $incomingMessage['is_read'] = true;
             $this->messages[] = $incomingMessage;
             $this->dispatch('scroll-to-bottom');
         }
-        // Since we are using #[Computed] for users, the sidebar updates automatically on next render
     }
 
     public function handleMessageRead($event)
     {
         if ($this->selectedUser && $event['readerId'] == $this->selectedUser->id) {
             foreach ($this->messages as &$message) {
-                if ($message['sender_id'] == auth()->id()) {
-                    $message['is_read'] = true;
-                }
+                if ($message['sender_id'] == auth()->id()) $message['is_read'] = true;
             }
         }
     }

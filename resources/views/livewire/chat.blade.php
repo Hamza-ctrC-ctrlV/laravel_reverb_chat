@@ -1,13 +1,12 @@
 <div class="flex h-screen bg-gray-100" wire:loading.class="opacity-50" wire:loading.class.remove="opacity-100" wire:target="selectUser">
-    <div class="w-1/4 bg-white border-r border-gray-200 overflow-y-auto">
+    <div class="w-1/4 bg-white border-r border-gray-200 flex flex-col">
         <div class="p-4 border-b border-gray-200">
             <h2 class="text-xl font-semibold text-gray-800">Messages</h2>
         </div>
 
-        <div class="overflow-y-auto">
-            {{-- Use $this->users to access the computed property --}}
+        <div class="flex-1 overflow-y-auto">
             @forelse($this->users as $user)
-                <div wire:key="user-box-{{ $user->id }}" 
+                <div wire:key="user-row-{{ $user->id }}" 
                      wire:click="selectUser({{ $user->id }})" 
                      class="flex items-center p-4 border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition {{ $selectedUser && $selectedUser->id == $user->id ? 'bg-blue-50' : '' }}">
                     
@@ -62,7 +61,7 @@
                     <h3 class="font-semibold text-gray-800">{{ $selectedUser->name }}</h3>
                     <p class="text-xs text-gray-500">
                         @if(in_array($selectedUser->id, $onlineUsers))
-                            <span class="text-green-600">● Online</span>
+                            <span class="text-green-600 font-medium">● Online</span>
                         @else
                             Offline
                         @endif
@@ -70,68 +69,88 @@
                 </div>
             </div>
 
-            <div class="flex-1 overflow-y-auto p-4 space-y-2 bg-gray-50" id="chat-messages">
+            <div class="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50" id="chat-messages">
                 @forelse($messages as $message)
-                    <div wire:key="msg-{{ $message['id'] }}" class="flex {{ $message['sender_id'] == $currentUserId ? 'justify-end' : 'justify-start' }}">
+                    <div wire:key="msg-{{ $message['id'] ?? $loop->index }}" class="flex {{ $message['sender_id'] == $currentUserId ? 'justify-end' : 'justify-start' }}">
                         <div class="max-w-xs lg:max-w-md">
-                            <div class="rounded-2xl px-4 py-2 {{ $message['sender_id'] == $currentUserId ? 'bg-blue-500 text-white' : 'bg-white text-gray-800 border shadow-sm' }}">
+                            <div class="rounded-2xl px-4 py-2 {{ $message['sender_id'] == $currentUserId ? 'bg-blue-500 text-white shadow-sm' : 'bg-white text-gray-800 border' }}">
                                 <p class="break-words text-[15px]">{{ $message['message'] }}</p>
                             </div>
-                            <div class="flex items-center {{ $message['sender_id'] == $currentUserId ? 'justify-end' : 'justify-start' }} mt-0.5 px-3 space-x-1.5">
+                            <div class="flex items-center {{ $message['sender_id'] == $currentUserId ? 'justify-end' : 'justify-start' }} mt-1 px-2 space-x-1.5">
                                 @if($message['sender_id'] == $currentUserId)
-                                    <span class="text-[11px] {{ $message['is_read'] ? 'text-blue-600 font-bold' : 'text-gray-500' }}">
+                                    <span class="text-[10px] {{ $message['is_read'] ? 'text-blue-500 font-bold' : 'text-gray-400' }}">
                                         {{ $message['is_read'] ? 'Read' : 'Delivered' }}
                                     </span>
                                 @endif
-                                <span class="text-[11px] text-gray-500">
-                                    {{ \Carbon\Carbon::parse($message['created_at'])->format('g:i A') }}
-                                </span>
+                                <span class="text-[10px] text-gray-400">{{ \Carbon\Carbon::parse($message['created_at'])->format('g:i A') }}</span>
                             </div>
                         </div>
                     </div>
                 @empty
                     <div class="flex items-center justify-center h-full">
-                        <p class="text-gray-500">No messages yet. Start the conversation!</p>
+                        <p class="text-gray-400">Start your conversation with {{ $selectedUser->name }}</p>
                     </div>
                 @endforelse
+
+                @if($isTyping)
+                    <div class="flex justify-start">
+                        <div class="bg-gray-200 text-gray-500 px-4 py-2 rounded-2xl text-xs italic animate-pulse">
+                            {{ $selectedUser->name }} is typing...
+                        </div>
+                    </div>
+                @endif
             </div>
 
             <div class="bg-white border-t border-gray-200 p-4">
                 <form wire:submit.prevent="submit" class="flex items-center space-x-3">
-                    <input type="text" wire:model="newMessage" placeholder="type your message..." class="flex-1 bg-gray-100 border-0 rounded-full px-5 py-2.5 focus:ring-2 focus:ring-blue-500 text-gray-800" autocomplete="off">
-                    <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white rounded-full w-9 h-9 flex items-center justify-center transition disabled:opacity-50">
-                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z"/>
-                        </svg>
+                    <input 
+                        type="text" 
+                        id="chat-input"
+                        wire:model="newMessage" 
+                        placeholder="Type a message..." 
+                        class="flex-1 bg-gray-100 border-0 rounded-full px-5 py-2.5 focus:ring-2 focus:ring-blue-500 text-gray-800"
+                        autocomplete="off"
+                    >
+                    <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center transition flex-shrink-0">
+                        <svg class="w-5 h-5 rotate-90" fill="currentColor" viewBox="0 0 24 24"><path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z"/></svg>
                     </button>
                 </form>
             </div>
         @else
-            <div class="flex-1 flex items-center justify-center bg-gray-50">
-                <div class="text-center">
-                    <h3 class="mt-2 text-lg font-medium text-gray-900">Select a conversation</h3>
-                    <p class="mt-1 text-sm text-gray-500">Choose a user to start chatting</p>
-                </div>
-            </div>
+            <div class="flex-1 flex items-center justify-center bg-gray-50 text-gray-500">Select a contact to chat</div>
         @endif
     </div>
 </div>
 
 @script
 <script>
+    let typingTimer;
+
+    // Whisper typing status using Reverb
+    document.getElementById('chat-input')?.addEventListener('input', () => {
+        window.Echo.join('chat-presence')
+            .whisper('typing', {
+                typingId: @js(auth()->id()),
+                receiverId: @js($selectedUser ? $selectedUser->id : null)
+            });
+    });
+
+    $wire.on('reset-typing', () => {
+        clearTimeout(typingTimer);
+        typingTimer = setTimeout(() => {
+            $wire.set('isTyping', false);
+        }, 3000);
+    });
+
     $wire.on('scroll-to-bottom', () => {
         setTimeout(() => {
-            const chatMessages = document.getElementById('chat-messages');
-            if (chatMessages) {
-                chatMessages.scrollTop = chatMessages.scrollHeight;
-            }
+            const el = document.getElementById('chat-messages');
+            if (el) el.scrollTop = el.scrollHeight;
         }, 50);
     });
 
-    // Initial scroll on page load
-    const chatMessages = document.getElementById('chat-messages');
-    if (chatMessages) {
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
+    // Handle initial scroll
+    const el = document.getElementById('chat-messages');
+    if (el) el.scrollTop = el.scrollHeight;
 </script>
 @endscript
