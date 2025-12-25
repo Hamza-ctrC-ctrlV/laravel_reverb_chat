@@ -132,20 +132,32 @@ class Chat extends Component
     public function handleIncomingMessage($event)
     {
         $incomingMessage = $event['message'];
+
+        // If I have this user's chat open right now...
         if ($this->selectedUser && $incomingMessage['sender_id'] == $this->selectedUser->id) {
+            // 1. Update database
             ChatMessage::where('id', $incomingMessage['id'])->update(['is_read' => true]);
-            broadcast(new MessageRead(auth()->id(), $incomingMessage['sender_id']))->toOthers();
+            
+            // 2. Tell the sender I read it
+            broadcast(new MessageRead(auth()->id(), $this->selectedUser->id))->toOthers();
+            
+            // 3. Add to my UI as "read"
             $incomingMessage['is_read'] = true;
             $this->messages[] = $incomingMessage;
+            
             $this->dispatch('scroll-to-bottom');
         }
     }
 
     public function handleMessageRead($event)
     {
+        // If the person I am currently talking to just read my messages...
         if ($this->selectedUser && $event['readerId'] == $this->selectedUser->id) {
-            foreach ($this->messages as &$message) {
-                if ($message['sender_id'] == auth()->id()) $message['is_read'] = true;
+            // Update all messages in the CURRENT array to is_read = true
+            foreach ($this->messages as $key => $message) {
+                if ($message['sender_id'] == auth()->id() && $message['receiver_id'] == $this->selectedUser->id) {
+                    $this->messages[$key]['is_read'] = true;
+                }
             }
         }
     }

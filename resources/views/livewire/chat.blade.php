@@ -77,11 +77,13 @@
                                 <p class="break-words text-[15px]">{{ $message['message'] }}</p>
                             </div>
                             <div class="flex items-center {{ $message['sender_id'] == $currentUserId ? 'justify-end' : 'justify-start' }} mt-1 px-2 space-x-1.5">
-                                @if($message['sender_id'] == $currentUserId)
-                                    <span class="text-[10px] {{ $message['is_read'] ? 'text-blue-500 font-bold' : 'text-gray-400' }}">
-                                        {{ $message['is_read'] ? 'Read' : 'Delivered' }}
-                                    </span>
-                                @endif
+                            @if($message['sender_id'] == $currentUserId)
+                                {{-- We add a specific wire:key for the status span --}}
+                                <span wire:key="status-{{ $message['id'] }}-{{ $message['is_read'] }}" 
+                                    class="text-[10px] {{ $message['is_read'] ? 'text-blue-500 font-bold' : 'text-gray-400' }}">
+                                    {{ $message['is_read'] ? 'Read' : 'Delivered' }}
+                                </span>
+                            @endif
                                 <span class="text-[10px] text-gray-400">{{ \Carbon\Carbon::parse($message['created_at'])->format('g:i A') }}</span>
                             </div>
                         </div>
