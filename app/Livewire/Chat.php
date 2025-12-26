@@ -6,25 +6,29 @@ use App\Models\ChatMessage;
 use App\Models\User;
 use App\Events\MessageSent;
 use App\Events\MessageRead;
+use App\Events\UserTyping;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Livewire\Component;
-use Livewire\Attributes\On;
 use Livewire\Attributes\Computed;
+
+use function Laravel\Prompts\select;
 
 class Chat extends Component
 {
     public $selectedUser;
     public $newMessage = '';
+    public $searchEmail = '';
     public $currentUserId;
     public $messages = [];
     public $onlineUsers = [];
-    public $isTyping = false;
+    public $typingUserId = null;
+    public $loginID;
 
     public function mount()
     {
         $this->currentUserId = Auth::id();
-        
+
         if ($this->users->count() > 0) {
             $this->selectUser($this->users->first()->id);
         }
@@ -36,6 +40,16 @@ class Chat extends Component
         $authId = Auth::id();
 
         return User::where('users.id', '!=', $authId)
+            ->whereExists(function ($query) use ($authId) {
+                $query->select(DB::raw(1))
+                    ->from('chat_messages')
+                    ->where(function ($q) use ($authId) {
+                        $q->whereColumn('sender_id', 'users.id')->where('receiver_id', $authId);
+                    })
+                    ->orWhere(function ($q) use ($authId) {
+                        $q->whereColumn('receiver_id', 'users.id')->where('sender_id', $authId);
+                    });
+            })
             ->leftJoin('chat_messages', function ($join) use ($authId) {
                 $join->on('chat_messages.id', '=', DB::raw("(
                     SELECT id FROM chat_messages 
@@ -57,10 +71,24 @@ class Chat extends Component
             ->get();
     }
 
+    public function startNewChat()
+    {
+        $this->validate(['searchEmail' => 'required|email|exists:users,email'], ['exists' => 'User not found.']);
+
+        $user = User::where('email', $this->searchEmail)->first();
+
+        if ($user->id === auth()->id()) {
+            $this->addError('searchEmail', 'You cannot chat with yourself.');
+            return;
+        }
+
+        $this->searchEmail = '';
+        $this->selectUser($user->id);
+    }
+
     public function selectUser($id)
     {
         $this->selectedUser = User::find($id);
-        $this->isTyping = false; // Reset typing status when switching users
         if ($this->selectedUser) {
             $this->loadMessages();
         }
@@ -104,58 +132,54 @@ class Chat extends Component
         $this->messages[] = $message->toArray();
         $this->newMessage = "";
         
-        $this->dispatch('message-sent');
         $this->dispatch('scroll-to-bottom');
         broadcast(new MessageSent($message))->toOthers();
     }
+
+    // Typing Event using Reverb
+    public function userTyping()
+    {
+        $this->dispatch("userTyping", userID : $this->loginID, UserName: Auth::user()->name, selectedUserID: $this->selectedUser->id);
+    }
+
 
     public function getListeners()
     {
         return [
             "echo-private:chat.{$this->currentUserId},MessageSent" => 'handleIncomingMessage',
             "echo-private:chat.{$this->currentUserId},MessageRead" => 'handleMessageRead',
-            "echo-presence:chat-presence,.client-typing" => 'handleTyping', // Whisper Listener
+            "echo-private:chat.{$this->currentUserId},UserTyping" => 'showTypingIndicator',
             "echo-presence:chat-presence,here" => 'updateOnlineUsers',
             "echo-presence:chat-presence,joining" => 'userJoined',
             "echo-presence:chat-presence,leaving" => 'userLeft',
         ];
     }
 
-    public function handleTyping($event)
+    public function showTypingIndicator($event)
     {
-        if ($this->selectedUser && $event['typingId'] == $this->selectedUser->id && $event['receiverId'] == auth()->id()) {
-            $this->isTyping = true;
-            $this->dispatch('reset-typing');
-        }
+        $this->typingUserId = $event['senderId'];
+        $this->dispatchBrowserEvent('showTyping');
     }
 
     public function handleIncomingMessage($event)
     {
         $incomingMessage = $event['message'];
 
-        // If I have this user's chat open right now...
         if ($this->selectedUser && $incomingMessage['sender_id'] == $this->selectedUser->id) {
-            // 1. Update database
             ChatMessage::where('id', $incomingMessage['id'])->update(['is_read' => true]);
-            
-            // 2. Tell the sender I read it
             broadcast(new MessageRead(auth()->id(), $this->selectedUser->id))->toOthers();
             
-            // 3. Add to my UI as "read"
             $incomingMessage['is_read'] = true;
             $this->messages[] = $incomingMessage;
-            
             $this->dispatch('scroll-to-bottom');
         }
     }
 
     public function handleMessageRead($event)
     {
-        // If the person I am currently talking to just read my messages...
         if ($this->selectedUser && $event['readerId'] == $this->selectedUser->id) {
-            // Update all messages in the CURRENT array to is_read = true
             foreach ($this->messages as $key => $message) {
-                if ($message['sender_id'] == auth()->id() && $message['receiver_id'] == $this->selectedUser->id) {
+                if ($message['sender_id'] == auth()->id() && !$message['is_read']) {
                     $this->messages[$key]['is_read'] = true;
                 }
             }
