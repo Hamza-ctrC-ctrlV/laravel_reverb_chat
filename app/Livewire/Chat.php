@@ -115,6 +115,7 @@ class Chat extends Component
             ->toArray();
             
         $this->dispatch('scroll-to-bottom');
+        $this->dispatch('$refresh');
     }
 
     public function submit()
@@ -165,15 +166,25 @@ class Chat extends Component
     {
         $incomingMessage = $event['message'];
 
+        // If chat with this user is open
         if ($this->selectedUser && $incomingMessage['sender_id'] == $this->selectedUser->id) {
-            ChatMessage::where('id', $incomingMessage['id'])->update(['is_read' => true]);
+
+            ChatMessage::where('id', $incomingMessage['id'])
+                ->update(['is_read' => true]);
+
             broadcast(new MessageRead(auth()->id(), $this->selectedUser->id))->toOthers();
-            
+
             $incomingMessage['is_read'] = true;
             $this->messages[] = $incomingMessage;
+
             $this->dispatch('scroll-to-bottom');
         }
+        // Message from another user → update sidebar badge
+        else {
+            $this->dispatch('$refresh'); // ✅ THIS WAS THE BUG
+        }
     }
+
 
     public function handleMessageRead($event)
     {

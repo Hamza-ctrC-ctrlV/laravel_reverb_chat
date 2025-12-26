@@ -43,6 +43,13 @@
                     <div class="ml-3 flex-1 overflow-hidden">
                         <div class="flex justify-between items-center">
                             <h3 class="font-semibold text-gray-800 truncate">{{ $user->name }}</h3>
+
+                            @if($user->unread_count > 0)
+                                <span class="ml-2 min-w-[20px] h-5 px-1.5 flex items-center justify-center
+                                            bg-blue-500 text-white text-xs font-bold rounded-full">
+                                    {{ $user->unread_count }}
+                                </span>
+                            @endif
                         </div>
                         <p class="text-sm text-gray-500 truncate">{{ $user->last_message_preview ?? 'No messages yet' }}</p>
                     </div>
@@ -151,13 +158,7 @@
         const typingUsers = [];
         const chatMessages = document.getElementById('chat-messages');
 
-        // DEBUG: Confirm script initialization
-        console.log('Typing script initialized. Listening for Livewire events...');
-
         Livewire.on('userTyping', (event) => {
-            // DEBUG: Outbound signal
-            console.log(`%c SENDING WHISPER: You are typing to User ID: ${event.selectedUserID}`, 'color: #3b82f6; font-weight: bold;');
-
             // Send whisper to other user
             window.Echo.private(`chat.${event.selectedUserID}`)
                 .whisper('typing', {
@@ -169,10 +170,6 @@
         // Listen for typing from other users
         window.Echo.private(`chat.${@js(Auth::id())}`)
             .listenForWhisper('typing', (payload) => {
-                // DEBUG: Inbound signal
-                console.log(`%c RECEIVED WHISPER: ${payload.UserName} is typing...`, 'color: #10b981; font-weight: bold;');
-                console.dir(payload);
-
                 if (!typingUsers.includes(payload.UserName)) {
                     typingUsers.push(payload.UserName);
                 }
@@ -180,20 +177,16 @@
 
                 setTimeout(() => {
                     const index = typingUsers.indexOf(payload.UserName);
-                    if (index > -1) {
-                        typingUsers.splice(index, 1);
-                        // DEBUG: Clean up
-                        console.log(`Typing timeout reached for ${payload.UserName}`);
-                    }
+                    if (index > -1) typingUsers.splice(index, 1);
                     updateTyping();
-                }, 3000);
+                }, 3500);
             });
 
         function updateTyping() {
-            const container = chatMessages;
-            if (!container) return;
+            const templates = chatMessages.querySelectorAll('template[x-for]');
+            templates.forEach(t => t.remove()); // Clear existing template nodes
 
-            // Clear existing indicators
+            const container = chatMessages;
             container.querySelectorAll('.typing-indicator').forEach(el => el.remove());
 
             typingUsers.forEach(user => {
@@ -203,8 +196,7 @@
                 container.appendChild(div);
             });
 
-            // Scroll to bottom when indicator appears
-            container.scrollTop = container.scrollHeight;
+            chatMessages.scrollTop = chatMessages.scrollHeight;
         }
     });
 
