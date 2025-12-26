@@ -186,7 +186,7 @@
                         console.log(`Typing timeout reached for ${payload.UserName}`);
                     }
                     updateTyping();
-                }, 3500);
+                }, 3000);
             });
 
         function updateTyping() {
