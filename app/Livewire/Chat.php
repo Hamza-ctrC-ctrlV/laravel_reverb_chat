@@ -203,6 +203,13 @@ class Chat extends Component
 
     public function render()
     {
-        return view('livewire.chat');
+        return view('livewire.chat')
+            ->layout('components.layouts.empty');
+    }
+    public bool $showUserMenu = false;
+
+    public function toggleUserMenu()
+    {
+        $this->showUserMenu = !$this->showUserMenu;
     }
 }
