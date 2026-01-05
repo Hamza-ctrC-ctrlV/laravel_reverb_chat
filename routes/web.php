@@ -5,36 +5,25 @@ use Laravel\Fortify\Features;
 use Livewire\Volt\Volt;
 use App\Livewire\Chat;
 
-// 1. Home logic: If logged in, go to chat. If not, show welcome.
-Route::get('/', function () {
-    if (auth()->check()) {
-        return redirect()->route('chat');
-    }
-    return view('welcome');
-})->name('home');
+// Only guests see the welcome page. 
+// If logged in, Laravel's 'guest' middleware automatically redirects to 'home' (which we will set to /chat)
+Route::view('/', 'welcome')->middleware('guest')->name('home');
 
-// 2. Main App Routes
 Route::middleware(['auth', 'verified'])->group(function () {
-    
-    // THE CHAT (Your new "Dashboard")
+    // The main app
     Route::get("chat", Chat::class)->name("chat");
-
-    // SETTINGS / PROFILE
-    Route::redirect('settings', 'settings/profile');
-    Volt::route('settings/profile', 'settings.profile')->name('profile.edit');
-    Volt::route('settings/password', 'settings.password')->name('user-password.edit');
-    Volt::route('settings/appearance', 'settings.appearance')->name('appearance.edit');
-
-    Volt::route('settings/two-factor', 'settings.two-factor')
-        ->middleware(
-            when(
-                Features::canManageTwoFactorAuthentication()
-                    && Features::optionEnabled(Features::twoFactorAuthentication(), 'confirmPassword'),
-                ['password.confirm'],
-                [],
-            ),
-        )
-        ->name('two-factor.show');
+    
+    // Settings Group
+    Route::prefix('settings')->group(function () {
+        Route::redirect('/', 'settings/profile');
+        Volt::route('profile', 'settings.profile')->name('profile.edit');
+        Volt::route('password', 'settings.password')->name('user-password.edit');
+        Volt::route('appearance', 'settings.appearance')->name('appearance.edit');
+        
+        if (Features::canManageTwoFactorAuthentication()) {
+            Volt::route('two-factor', 'settings.two-factor')
+                ->middleware(Features::optionEnabled(Features::twoFactorAuthentication(), 'confirmPassword') ? ['password.confirm'] : [])
+                ->name('two-factor.show');
+        }
+    });
 });
-
-// 3. REMOVED: Dashboard route has been deleted.

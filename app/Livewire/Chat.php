@@ -6,13 +6,10 @@ use App\Models\ChatMessage;
 use App\Models\User;
 use App\Events\MessageSent;
 use App\Events\MessageRead;
-use App\Events\UserTyping;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Livewire\Component;
 use Livewire\Attributes\Computed;
-
-use function Laravel\Prompts\select;
 
 class Chat extends Component
 {
@@ -22,13 +19,11 @@ class Chat extends Component
     public $currentUserId;
     public $messages = [];
     public $onlineUsers = [];
-    public $typingUserId = null;
-    public $loginID;
+    public $showUserMenu = false;
 
     public function mount()
     {
         $this->currentUserId = Auth::id();
-
         if ($this->users->count() > 0) {
             $this->selectUser($this->users->first()->id);
         }
@@ -38,8 +33,10 @@ class Chat extends Component
     public function users()
     {
         $authId = Auth::id();
-
         return User::where('users.id', '!=', $authId)
+            ->where(function($q) {
+                if($this->searchEmail) $q->where('email', 'like', "%{$this->searchEmail}%");
+            })
             ->whereExists(function ($query) use ($authId) {
                 $query->select(DB::raw(1))
                     ->from('chat_messages')
@@ -71,21 +68,6 @@ class Chat extends Component
             ->get();
     }
 
-    public function startNewChat()
-    {
-        $this->validate(['searchEmail' => 'required|email|exists:users,email'], ['exists' => 'User not found.']);
-
-        $user = User::where('email', $this->searchEmail)->first();
-
-        if ($user->id === auth()->id()) {
-            $this->addError('searchEmail', 'You cannot chat with yourself.');
-            return;
-        }
-
-        $this->searchEmail = '';
-        $this->selectUser($user->id);
-    }
-
     public function selectUser($id)
     {
         $this->selectedUser = User::find($id);
@@ -98,12 +80,15 @@ class Chat extends Component
     {
         if (!$this->selectedUser) return;
 
-        ChatMessage::where('sender_id', $this->selectedUser->id)
+        $unread = ChatMessage::where('sender_id', $this->selectedUser->id)
             ->where('receiver_id', auth()->id())
-            ->where('is_read', false)
-            ->update(['is_read' => true]);
+            ->where('is_read', false);
 
-        broadcast(new MessageRead(auth()->id(), $this->selectedUser->id))->toOthers();
+        if ($unread->exists()) {
+            $unread->update(['is_read' => true]);
+            // Notify the sender that we read their messages
+            broadcast(new MessageRead(auth()->id(), $this->selectedUser->id))->toOthers();
+        }
 
         $this->messages = ChatMessage::where(function($q) {
                 $q->where("sender_id", auth()->id())->where("receiver_id", $this->selectedUser->id);
@@ -113,15 +98,11 @@ class Chat extends Component
             ->oldest()
             ->get()
             ->toArray();
-            
-        $this->dispatch('scroll-to-bottom');
-        $this->dispatch('$refresh');
     }
 
     public function submit()
     {
-        $this->validate(['newMessage' => 'required|string|max:5000']);
-        if (!$this->selectedUser) return;
+        if (empty(trim($this->newMessage))) return;
 
         $message = ChatMessage::create([
             "sender_id" => Auth::id(),
@@ -130,71 +111,36 @@ class Chat extends Component
             "is_read" => false,
         ]);
 
+        $this->newMessage = ""; 
         $this->messages[] = $message->toArray();
-        $this->newMessage = "";
-        
-        $this->dispatch('scroll-to-bottom');
         broadcast(new MessageSent($message))->toOthers();
     }
 
-    // Typing Event using Reverb
-    public function userTyping()
+    public function handleIncomingMessage($event)
     {
-        $this->dispatch("userTyping", userID : $this->loginID, UserName: Auth::user()->name, selectedUserID: $this->selectedUser->id);
+        if ($this->selectedUser && $event['message']['sender_id'] == $this->selectedUser->id) {
+            $this->loadMessages();
+        } else {
+            unset($this->users); 
+        }
     }
-
 
     public function getListeners()
     {
         return [
             "echo-private:chat.{$this->currentUserId},MessageSent" => 'handleIncomingMessage',
-            "echo-private:chat.{$this->currentUserId},MessageRead" => 'handleMessageRead',
-            "echo-private:chat.{$this->currentUserId},UserTyping" => 'showTypingIndicator',
+            // We handle MessageRead visually via JS, so we only need this 
+            // to keep the PHP array in sync if needed.
+            "echo-private:chat.{$this->currentUserId},MessageRead" => 'syncReadStatus',
             "echo-presence:chat-presence,here" => 'updateOnlineUsers',
             "echo-presence:chat-presence,joining" => 'userJoined',
             "echo-presence:chat-presence,leaving" => 'userLeft',
         ];
     }
 
-    public function showTypingIndicator($event)
+    public function syncReadStatus()
     {
-        $this->typingUserId = $event['senderId'];
-        $this->dispatchBrowserEvent('showTyping');
-    }
-
-    public function handleIncomingMessage($event)
-    {
-        $incomingMessage = $event['message'];
-
-        // If chat with this user is open
-        if ($this->selectedUser && $incomingMessage['sender_id'] == $this->selectedUser->id) {
-
-            ChatMessage::where('id', $incomingMessage['id'])
-                ->update(['is_read' => true]);
-
-            broadcast(new MessageRead(auth()->id(), $this->selectedUser->id))->toOthers();
-
-            $incomingMessage['is_read'] = true;
-            $this->messages[] = $incomingMessage;
-
-            $this->dispatch('scroll-to-bottom');
-        }
-        // Message from another user → update sidebar badge
-        else {
-            $this->dispatch('$refresh'); // ✅ THIS WAS THE BUG
-        }
-    }
-
-
-    public function handleMessageRead($event)
-    {
-        if ($this->selectedUser && $event['readerId'] == $this->selectedUser->id) {
-            foreach ($this->messages as $key => $message) {
-                if ($message['sender_id'] == auth()->id() && !$message['is_read']) {
-                    $this->messages[$key]['is_read'] = true;
-                }
-            }
-        }
+        foreach($this->messages as &$m) { $m['is_read'] = true; }
     }
 
     public function updateOnlineUsers($users) { $this->onlineUsers = collect($users)->pluck('id')->toArray(); }
@@ -203,13 +149,6 @@ class Chat extends Component
 
     public function render()
     {
-        return view('livewire.chat')
-            ->layout('components.layouts.empty');
-    }
-    public bool $showUserMenu = false;
-
-    public function toggleUserMenu()
-    {
-        $this->showUserMenu = !$this->showUserMenu;
+        return view('livewire.chat')->layout('components.layouts.empty');
     }
 }

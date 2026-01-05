@@ -9,6 +9,7 @@ use Illuminate\Contracts\Broadcasting\ShouldBroadcast; // CRITICAL
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
+
 class MessageRead implements ShouldBroadcast // MUST IMPLEMENT THIS
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
